@@ -1,28 +1,30 @@
 import os
-from openai import OpenAI
 from dotenv import load_dotenv
+from openai import OpenAI
 
 
 load_dotenv()
 
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+
+if not DEEPSEEK_API_KEY:
+    raise RuntimeError("DEEPSEEK_API_KEY не найден. Проверь файл .env")
+
+
 client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
+    api_key=DEEPSEEK_API_KEY,
+    base_url="https://api.deepseek.com",
 )
 
 
-def format_pace(seconds: int) -> str:
+def format_pace(seconds):
     minutes = seconds // 60
     sec = seconds % 60
     return f"{minutes}:{sec:02d}"
 
 
-def generate_training_with_ai(profile, workout_type: str) -> str:
-    vo2_text = (
-        str(profile.vo2max)
-        if profile.vo2max is not None
-        else "не указан"
-    )
+def generate_training_with_ai(profile, workout_type):
+    vo2_text = profile.vo2max if profile.vo2max is not None else "не указан"
 
     prompt = f"""
 Сгенерируй тренировку по плаванию на русском языке.
@@ -35,23 +37,39 @@ def generate_training_with_ai(profile, workout_type: str) -> str:
 - тип тренировки: {workout_type}
 
 Требования:
-1. Тренировка должна быть безопасной.
-2. Учитывай уровень пловца.
-3. Учитывай возрастную категорию.
-4. Учитывай текущий темп на 100 м.
+1. Учитывай уровень пловца.
+2. Учитывай возрастную категорию.
+3. Учитывай текущий темп на 100 м.
+4. Сделай тренировку безопасной.
 5. Структура ответа:
-   - краткое описание цели тренировки;
+   - цель тренировки;
    - разминка;
    - основная часть;
    - заминка;
-   - рекомендации по безопасности.
-6. Не делай слишком длинный ответ.
-7. Если тип тренировки — гипоксия, обязательно добавь предупреждение, что нельзя выполнять задержки дыхания в одиночку.
+   - рекомендации.
+6. Если тренировка гипоксическая, обязательно добавь предупреждение:
+   нельзя выполнять задержки дыхания в одиночку.
+7. Ответ должен быть понятным, практичным и не слишком длинным.
 """
 
-    response = client.responses.create(
-        model="gpt-5.5",
-        input=prompt
+    response = client.chat.completions.create(
+        model="deepseek-chat",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Ты профессиональный тренер по плаванию. "
+                    "Генерируй безопасные, понятные и реалистичные тренировки."
+                ),
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ],
+        stream=False,
+        reasoning_effort="high",
+        extra_body={"thinking": {"type": "enabled"}},
     )
 
-    return response.output_text
+    return response.choices[0].message.content
