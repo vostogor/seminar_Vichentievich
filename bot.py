@@ -1,13 +1,16 @@
 import asyncio
 import logging
-import json
-from datetime import datetime
-from pathlib import Path
-from dotenv import load_dotenv
 import os
 
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery
+from dotenv import load_dotenv
+
+from aiogram import Bot, Dispatcher
+from aiogram.types import (
+    Message,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardRemove,
+)
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -21,18 +24,6 @@ from backend.database import (
 
 from backend.ai_generator import generate_training_with_ai
 
-load_dotenv()
-TOKEN = os.getenv("BOT_TOKEN")
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
-
-
-from aiogram.types import (
-    Message,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    ReplyKeyboardRemove,
-)
 
 load_dotenv()
 
@@ -44,8 +35,6 @@ if not TOKEN:
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-user_profiles = {}
-
 
 class ProfileForm(StatesGroup):
     age = State()
@@ -53,6 +42,7 @@ class ProfileForm(StatesGroup):
     vo2_question = State()
     vo2_value = State()
     speed = State()
+
 
 class WorkoutForm(StatesGroup):
     workout_type = State()
@@ -78,6 +68,14 @@ level_keyboard = ReplyKeyboardMarkup(
 yes_no_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Да"), KeyboardButton(text="Нет")],
+    ],
+    resize_keyboard=True,
+)
+
+workout_keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="силовая"), KeyboardButton(text="скорость")],
+        [KeyboardButton(text="выносливость"), KeyboardButton(text="гипоксия")],
     ],
     resize_keyboard=True,
 )
@@ -117,11 +115,13 @@ def format_pace(seconds: int) -> str:
 
 @dp.message(Command("start"))
 async def start(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    user_profiles[user_id] = {}
+    await state.clear()
 
     await message.answer(
-        "Привет. Это учебный студентческий проект Вичентиевич Марии. Бот создан для генерации тренеровок по плаванию по типу тренировок и личных параметров. Сначала соберём данные для персонализации тренировок.\n\n"
+        "Привет. Это учебный студенческий проект Вичентиевич Марии.\n\n"
+        "Бот создан для генерации тренировок по плаванию по типу тренировки "
+        "и личным параметрам пользователя.\n\n"
+        "Сначала соберём данные для персонализации тренировок.\n\n"
         "Выбери возрастную категорию:",
         reply_markup=age_keyboard,
     )
@@ -131,7 +131,6 @@ async def start(message: Message, state: FSMContext):
 
 @dp.message(ProfileForm.age)
 async def get_age(message: Message, state: FSMContext):
-    user_id = message.from_user.id
     age = message.text
 
     if age not in ["14-29", "30-45", "46-60"]:
@@ -141,7 +140,7 @@ async def get_age(message: Message, state: FSMContext):
         )
         return
 
-    user_profiles[user_id]["age"] = age
+    await state.update_data(age=age)
 
     await message.answer(
         "Теперь выбери уровень плавания:",
@@ -153,7 +152,6 @@ async def get_age(message: Message, state: FSMContext):
 
 @dp.message(ProfileForm.level)
 async def get_level(message: Message, state: FSMContext):
-    user_id = message.from_user.id
     level = message.text
 
     if level not in ["начинающий", "любитель", "продвинутый", "КМС/МС"]:
@@ -163,7 +161,7 @@ async def get_level(message: Message, state: FSMContext):
         )
         return
 
-    user_profiles[user_id]["level"] = level
+    await state.update_data(level=level)
 
     await message.answer(
         "Ты знаешь свой VO2max?",
@@ -175,7 +173,6 @@ async def get_level(message: Message, state: FSMContext):
 
 @dp.message(ProfileForm.vo2_question)
 async def get_vo2_question(message: Message, state: FSMContext):
-    user_id = message.from_user.id
     answer = message.text
 
     if answer not in ["Да", "Нет"]:
@@ -194,7 +191,7 @@ async def get_vo2_question(message: Message, state: FSMContext):
         await state.set_state(ProfileForm.vo2_value)
         return
 
-    user_profiles[user_id]["vo2max"] = None
+    await state.update_data(vo2max=None)
 
     await message.answer(
         "Теперь укажи текущую среднюю скорость на 100 м.\n\n"
@@ -207,7 +204,6 @@ async def get_vo2_question(message: Message, state: FSMContext):
 
 @dp.message(ProfileForm.vo2_value)
 async def get_vo2_value(message: Message, state: FSMContext):
-    user_id = message.from_user.id
     text = message.text.strip().replace(",", ".")
 
     try:
@@ -222,7 +218,7 @@ async def get_vo2_value(message: Message, state: FSMContext):
         )
         return
 
-    user_profiles[user_id]["vo2max"] = vo2max
+    await state.update_data(vo2max=vo2max)
 
     await message.answer(
         "Теперь укажи текущую среднюю скорость на 100 м.\n\n"
@@ -268,15 +264,56 @@ async def get_speed(message: Message, state: FSMContext):
         f"Уровень плавания: {data['level']}\n"
         f"VO2max: {vo2_text}\n"
         f"Средняя скорость на 100 м: {format_pace(pace_seconds)}\n\n"
-        "Теперь можешь запросить тренировку командой /workout.",
+        "Теперь можешь посмотреть анкету командой /profile.\n"
+        "Или запросить тренировку командой /workout.",
         reply_markup=ReplyKeyboardRemove(),
     )
 
     await state.clear()
 
+
+@dp.message(Command("profile"))
+async def show_profile(message: Message):
+    user_id = message.from_user.id
+
+    profile = get_user_profile(user_id)
+
+    if profile is None:
+        await message.answer("Анкета пока не заполнена. Напиши /start.")
+        return
+
+    vo2_text = profile.vo2max if profile.vo2max is not None else "не указан"
+
+    await message.answer(
+        "Твоя анкета:\n\n"
+        f"Возрастная категория: {profile.age}\n"
+        f"Уровень плавания: {profile.level}\n"
+        f"VO2max: {vo2_text}\n"
+        f"Средняя скорость на 100 м: {format_pace(profile.pace_seconds)}"
+    )
+
+
+@dp.message(Command("workout"))
+async def workout(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+
+    profile = get_user_profile(user_id)
+
+    if profile is None:
+        await message.answer("Сначала нужно заполнить анкету. Напиши /start.")
+        return
+
+    await message.answer(
+        "Какой вид тренировки нужен сегодня?",
+        reply_markup=workout_keyboard,
+    )
+
+    await state.set_state(WorkoutForm.workout_type)
+
+
 @dp.message(WorkoutForm.workout_type)
 async def get_workout_type(message: Message, state: FSMContext):
-    telegram_id = message.from_user.id
+    user_id = message.from_user.id
     workout_type = message.text
 
     if workout_type not in ["силовая", "скорость", "выносливость", "гипоксия"]:
@@ -286,7 +323,7 @@ async def get_workout_type(message: Message, state: FSMContext):
         )
         return
 
-    profile = get_user_profile(telegram_id)
+    profile = get_user_profile(user_id)
 
     if profile is None:
         await message.answer("Анкета не найдена. Напиши /start.")
@@ -314,12 +351,12 @@ async def get_workout_type(message: Message, state: FSMContext):
 
     await state.clear()
 
+
 @dp.message(Command("reset"))
 async def reset_profile(message: Message, state: FSMContext):
     user_id = message.from_user.id
 
-    if user_id in user_profiles:
-        del user_profiles[user_id]
+    delete_user_profile(user_id)
 
     await state.clear()
 
