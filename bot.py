@@ -4,7 +4,7 @@ import os
 
 from dotenv import load_dotenv
 
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message,
     ReplyKeyboardMarkup,
@@ -80,6 +80,13 @@ workout_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True,
 )
 
+main_menu_keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Заполнить анкету заново")],
+        [KeyboardButton(text="Выбрать тренировку")],
+    ],
+    resize_keyboard=True,
+)
 
 def parse_pace_to_seconds(text: str) -> int | None:
     text = text.strip().lower()
@@ -259,14 +266,13 @@ async def get_speed(message: Message, state: FSMContext):
     vo2_text = data["vo2max"] if data["vo2max"] is not None else "не указан"
 
     await message.answer(
-        "Анкета сохранена в базе данных.\n\n"
-        f"Возрастная категория: {data['age']}\n"
-        f"Уровень плавания: {data['level']}\n"
-        f"VO2max: {vo2_text}\n"
-        f"Средняя скорость на 100 м: {format_pace(pace_seconds)}\n\n"
-        "Теперь можешь посмотреть анкету командой /profile.\n"
-        "Или запросить тренировку командой /workout.",
-        reply_markup=ReplyKeyboardRemove(),
+    "Анкета сохранена в базе данных.\n\n"
+    f"Возрастная категория: {data['age']}\n"
+    f"Уровень плавания: {data['level']}\n"
+    f"VO2max: {vo2_text}\n"
+    f"Средняя скорость на 100 м: {format_pace(pace_seconds)}\n\n"
+    "Теперь выбери действие в главном меню:",
+    reply_markup=main_menu_keyboard,
     )
 
     await state.clear()
@@ -292,6 +298,20 @@ async def show_profile(message: Message):
         f"Средняя скорость на 100 м: {format_pace(profile.pace_seconds)}"
     )
 
+@dp.message(Command("menu"))
+async def show_menu(message: Message):
+    await message.answer(
+        "Главное меню:",
+        reply_markup=main_menu_keyboard,
+    )
+
+@dp.message(F.text == "Выбрать тренировку")
+async def choose_workout_from_button(message: Message, state: FSMContext):
+    await workout(message, state)
+
+@dp.message(F.text == "Заполнить анкету заново")
+async def restart_profile_from_button(message: Message, state: FSMContext):
+    await start(message, state)
 
 @dp.message(Command("workout"))
 async def workout(message: Message, state: FSMContext):
@@ -343,6 +363,11 @@ async def get_workout_type(message: Message, state: FSMContext):
 
         await message.answer(workout_text)
 
+        await message.answer(
+        "Что сделать дальше?",
+        reply_markup=main_menu_keyboard,
+        )
+
     except Exception as error:
         await message.answer(
             "Не удалось сгенерировать тренировку.\n\n"
@@ -361,18 +386,17 @@ async def reset_profile(message: Message, state: FSMContext):
     await state.clear()
 
     await message.answer(
-        "Данные удалены. Чтобы заполнить анкету заново, напиши /start.",
-        reply_markup=ReplyKeyboardRemove(),
+    "Данные удалены. Можешь заполнить анкету заново.",
+    reply_markup=main_menu_keyboard,
     )
-
 
 @dp.message(Command("cancel"))
 async def cancel(message: Message, state: FSMContext):
     await state.clear()
 
     await message.answer(
-        "Действие отменено.",
-        reply_markup=ReplyKeyboardRemove(),
+        "Действие отменено. Возвращаю в главное меню.",
+        reply_markup=main_menu_keyboard,
     )
 
 
