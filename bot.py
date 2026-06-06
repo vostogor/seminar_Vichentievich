@@ -12,6 +12,15 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
+from backend.database import (
+    init_db,
+    save_user_profile,
+    get_user_profile,
+    delete_user_profile,
+)
+
+from backend.ai_generator import generate_training_with_ai
+
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=TOKEN)
@@ -24,7 +33,6 @@ from aiogram.types import (
     KeyboardButton,
     ReplyKeyboardRemove,
 )
-
 
 load_dotenv()
 
@@ -45,6 +53,9 @@ class ProfileForm(StatesGroup):
     vo2_question = State()
     vo2_value = State()
     speed = State()
+
+class WorkoutForm(StatesGroup):
+    workout_type = State()
 
 
 age_keyboard = ReplyKeyboardMarkup(
@@ -110,7 +121,7 @@ async def start(message: Message, state: FSMContext):
     user_profiles[user_id] = {}
 
     await message.answer(
-        "Привет. Сначала соберём данные для персонализации тренировок.\n\n"
+        "Привет. Это учебный студентческий проект Вичентиевич Марии. Бот создан для генерации тренеровок по плаванию по типу тренировок и личных параметров. Сначала соберём данные для персонализации тренировок.\n\n"
         "Выбери возрастную категорию:",
         reply_markup=age_keyboard,
     )
@@ -239,44 +250,69 @@ async def get_speed(message: Message, state: FSMContext):
         )
         return
 
-    user_profiles[user_id]["pace_seconds"] = pace_seconds
+    data = await state.get_data()
 
-    profile = user_profiles[user_id]
+    save_user_profile(
+        telegram_id=user_id,
+        age=data["age"],
+        level=data["level"],
+        vo2max=data["vo2max"],
+        pace_seconds=pace_seconds,
+    )
 
-    vo2_text = profile["vo2max"] if profile["vo2max"] is not None else "не указан"
+    vo2_text = data["vo2max"] if data["vo2max"] is not None else "не указан"
 
     await message.answer(
-        "Анкета сохранена.\n\n"
-        f"Возрастная категория: {profile['age']}\n"
-        f"Уровень плавания: {profile['level']}\n"
+        "Анкета сохранена в базе данных.\n\n"
+        f"Возрастная категория: {data['age']}\n"
+        f"Уровень плавания: {data['level']}\n"
         f"VO2max: {vo2_text}\n"
-        f"Средняя скорость на 100 м: {format_pace(profile['pace_seconds'])}",
+        f"Средняя скорость на 100 м: {format_pace(pace_seconds)}\n\n"
+        "Теперь можешь запросить тренировку командой /workout.",
         reply_markup=ReplyKeyboardRemove(),
     )
 
     await state.clear()
 
+@dp.message(WorkoutForm.workout_type)
+async def get_workout_type(message: Message, state: FSMContext):
+    telegram_id = message.from_user.id
+    workout_type = message.text
 
-@dp.message(Command("profile"))
-async def show_profile(message: Message):
-    user_id = message.from_user.id
-
-    if user_id not in user_profiles:
-        await message.answer("Анкета пока не заполнена. Напиши /start.")
+    if workout_type not in ["силовая", "скорость", "выносливость", "гипоксия"]:
+        await message.answer(
+            "Пожалуйста, выбери тип тренировки с клавиатуры.",
+            reply_markup=workout_keyboard,
+        )
         return
 
-    profile = user_profiles[user_id]
+    profile = get_user_profile(telegram_id)
 
-    vo2_text = profile["vo2max"] if profile["vo2max"] is not None else "не указан"
+    if profile is None:
+        await message.answer("Анкета не найдена. Напиши /start.")
+        await state.clear()
+        return
 
     await message.answer(
-        "Твоя анкета:\n\n"
-        f"Возрастная категория: {profile['age']}\n"
-        f"Уровень плавания: {profile['level']}\n"
-        f"VO2max: {vo2_text}\n"
-        f"Средняя скорость на 100 м: {format_pace(profile['pace_seconds'])}"
+        "Генерирую тренировку с помощью ИИ. Подожди несколько секунд...",
+        reply_markup=ReplyKeyboardRemove(),
     )
 
+    try:
+        workout_text = generate_training_with_ai(
+            profile=profile,
+            workout_type=workout_type,
+        )
+
+        await message.answer(workout_text)
+
+    except Exception as error:
+        await message.answer(
+            "Не удалось сгенерировать тренировку.\n\n"
+            f"Ошибка: {error}"
+        )
+
+    await state.clear()
 
 @dp.message(Command("reset"))
 async def reset_profile(message: Message, state: FSMContext):
@@ -305,6 +341,9 @@ async def cancel(message: Message, state: FSMContext):
 
 async def main():
     logging.basicConfig(level=logging.INFO)
+
+    init_db()
+
     await dp.start_polling(bot)
 
 
